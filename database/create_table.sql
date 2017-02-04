@@ -26,7 +26,7 @@ DROP TABLE IF EXISTS user_tokens;
 
 CREATE TABLE user_tokens (
   user_id	char(36)		NOT NULL REFERENCES users(id),
-  org_id	char(36)		NOT NULL REFERENCES organisations(id), 
+  org_id	char(36)		NOT NULL REFERENCES tokens(id), 
   number	SMALLINT	DEFAULT 1
 );
 
