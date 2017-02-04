@@ -1,0 +1,6 @@
+[postgres]
+  dbname="tokenizer"
+  host="localhost"
+  port=5433
+  user="Isaac"
+  sslmode="disable"
