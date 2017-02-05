@@ -13,7 +13,7 @@ func getTokens(w http.ResponseWriter, r *http.Request) {
 
 	var tokens,err = models.Tokens(boil.GetDB()).All()
 
-	if err == nil {
+	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
