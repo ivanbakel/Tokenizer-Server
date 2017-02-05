@@ -19,9 +19,9 @@ import (
 
 // UserToken is an object representing the database table.
 type UserToken struct {
-	UserID string     `boil:"user_id" json:"user_id" toml:"user_id" yaml:"user_id"`
-	OrgID  string     `boil:"org_id" json:"org_id" toml:"org_id" yaml:"org_id"`
-	Number null.Int16 `boil:"number" json:"number,omitempty" toml:"number" yaml:"number,omitempty"`
+	UserID  string     `boil:"user_id" json:"user_id" toml:"user_id" yaml:"user_id"`
+	TokenID string     `boil:"token_id" json:"token_id" toml:"token_id" yaml:"token_id"`
+	Number  null.Int16 `boil:"number" json:"number,omitempty" toml:"number" yaml:"number,omitempty"`
 
 	R *userTokenR `boil:"-" json:"-" toml:"-" yaml:"-"`
 	L userTokenL  `boil:"-" json:"-" toml:"-" yaml:"-"`
@@ -29,18 +29,18 @@ type UserToken struct {
 
 // userTokenR is where relationships are stored.
 type userTokenR struct {
-	User *User
-	Org  *Organisation
+	User  *User
+	Token *Token
 }
 
 // userTokenL is where Load methods for each relationship are stored.
 type userTokenL struct{}
 
 var (
-	userTokenColumns               = []string{"user_id", "org_id", "number"}
-	userTokenColumnsWithoutDefault = []string{"user_id", "org_id"}
+	userTokenColumns               = []string{"user_id", "token_id", "number"}
+	userTokenColumnsWithoutDefault = []string{"user_id", "token_id"}
 	userTokenColumnsWithDefault    = []string{"number"}
-	userTokenPrimaryKeyColumns     = []string{"user_id", "org_id"}
+	userTokenPrimaryKeyColumns     = []string{"user_id", "token_id"}
 )
 
 type (
@@ -338,21 +338,21 @@ func (o *UserToken) User(exec boil.Executor, mods ...qm.QueryMod) userQuery {
 	return query
 }
 
-// OrgG pointed to by the foreign key.
-func (o *UserToken) OrgG(mods ...qm.QueryMod) organisationQuery {
-	return o.Org(boil.GetDB(), mods...)
+// TokenG pointed to by the foreign key.
+func (o *UserToken) TokenG(mods ...qm.QueryMod) tokenQuery {
+	return o.Token(boil.GetDB(), mods...)
 }
 
-// Org pointed to by the foreign key.
-func (o *UserToken) Org(exec boil.Executor, mods ...qm.QueryMod) organisationQuery {
+// Token pointed to by the foreign key.
+func (o *UserToken) Token(exec boil.Executor, mods ...qm.QueryMod) tokenQuery {
 	queryMods := []qm.QueryMod{
-		qm.Where("id=?", o.OrgID),
+		qm.Where("id=?", o.TokenID),
 	}
 
 	queryMods = append(queryMods, mods...)
 
-	query := Organisations(exec, queryMods...)
-	queries.SetFrom(query.Query, "\"organisations\"")
+	query := Tokens(exec, queryMods...)
+	queries.SetFrom(query.Query, "\"tokens\"")
 
 	return query
 }
@@ -431,9 +431,9 @@ func (userTokenL) LoadUser(e boil.Executor, singular bool, maybeUserToken interf
 	return nil
 }
 
-// LoadOrg allows an eager lookup of values, cached into the
+// LoadToken allows an eager lookup of values, cached into the
 // loaded structs of the objects.
-func (userTokenL) LoadOrg(e boil.Executor, singular bool, maybeUserToken interface{}) error {
+func (userTokenL) LoadToken(e boil.Executor, singular bool, maybeUserToken interface{}) error {
 	var slice []*UserToken
 	var object *UserToken
 
@@ -450,18 +450,18 @@ func (userTokenL) LoadOrg(e boil.Executor, singular bool, maybeUserToken interfa
 		if object.R == nil {
 			object.R = &userTokenR{}
 		}
-		args[0] = object.OrgID
+		args[0] = object.TokenID
 	} else {
 		for i, obj := range slice {
 			if obj.R == nil {
 				obj.R = &userTokenR{}
 			}
-			args[i] = obj.OrgID
+			args[i] = obj.TokenID
 		}
 	}
 
 	query := fmt.Sprintf(
-		"select * from \"organisations\" where \"id\" in (%s)",
+		"select * from \"tokens\" where \"id\" in (%s)",
 		strmangle.Placeholders(dialect.IndexPlaceholders, count, 1, 1),
 	)
 
@@ -471,13 +471,13 @@ func (userTokenL) LoadOrg(e boil.Executor, singular bool, maybeUserToken interfa
 
 	results, err := e.Query(query, args...)
 	if err != nil {
-		return errors.Wrap(err, "failed to eager load Organisation")
+		return errors.Wrap(err, "failed to eager load Token")
 	}
 	defer results.Close()
 
-	var resultSlice []*Organisation
+	var resultSlice []*Token
 	if err = queries.Bind(results, &resultSlice); err != nil {
-		return errors.Wrap(err, "failed to bind eager loaded slice Organisation")
+		return errors.Wrap(err, "failed to bind eager loaded slice Token")
 	}
 
 	if len(userTokenAfterSelectHooks) != 0 {
@@ -489,14 +489,14 @@ func (userTokenL) LoadOrg(e boil.Executor, singular bool, maybeUserToken interfa
 	}
 
 	if singular && len(resultSlice) != 0 {
-		object.R.Org = resultSlice[0]
+		object.R.Token = resultSlice[0]
 		return nil
 	}
 
 	for _, foreign := range resultSlice {
 		for _, local := range slice {
-			if local.OrgID == foreign.ID {
-				local.R.Org = foreign
+			if local.TokenID == foreign.ID {
+				local.R.Token = foreign
 				break
 			}
 		}
@@ -549,7 +549,7 @@ func (o *UserToken) SetUser(exec boil.Executor, insert bool, related *User) erro
 		strmangle.SetParamNames("\"", "\"", 1, []string{"user_id"}),
 		strmangle.WhereClause("\"", "\"", 2, userTokenPrimaryKeyColumns),
 	)
-	values := []interface{}{related.ID, o.UserID, o.OrgID}
+	values := []interface{}{related.ID, o.UserID, o.TokenID}
 
 	if boil.DebugMode {
 		fmt.Fprintln(boil.DebugWriter, updateQuery)
@@ -581,38 +581,38 @@ func (o *UserToken) SetUser(exec boil.Executor, insert bool, related *User) erro
 	return nil
 }
 
-// SetOrgG of the user_token to the related item.
-// Sets o.R.Org to related.
-// Adds o to related.R.OrgUserTokens.
+// SetTokenG of the user_token to the related item.
+// Sets o.R.Token to related.
+// Adds o to related.R.UserTokens.
 // Uses the global database handle.
-func (o *UserToken) SetOrgG(insert bool, related *Organisation) error {
-	return o.SetOrg(boil.GetDB(), insert, related)
+func (o *UserToken) SetTokenG(insert bool, related *Token) error {
+	return o.SetToken(boil.GetDB(), insert, related)
 }
 
-// SetOrgP of the user_token to the related item.
-// Sets o.R.Org to related.
-// Adds o to related.R.OrgUserTokens.
+// SetTokenP of the user_token to the related item.
+// Sets o.R.Token to related.
+// Adds o to related.R.UserTokens.
 // Panics on error.
-func (o *UserToken) SetOrgP(exec boil.Executor, insert bool, related *Organisation) {
-	if err := o.SetOrg(exec, insert, related); err != nil {
+func (o *UserToken) SetTokenP(exec boil.Executor, insert bool, related *Token) {
+	if err := o.SetToken(exec, insert, related); err != nil {
 		panic(boil.WrapErr(err))
 	}
 }
 
-// SetOrgGP of the user_token to the related item.
-// Sets o.R.Org to related.
-// Adds o to related.R.OrgUserTokens.
+// SetTokenGP of the user_token to the related item.
+// Sets o.R.Token to related.
+// Adds o to related.R.UserTokens.
 // Uses the global database handle and panics on error.
-func (o *UserToken) SetOrgGP(insert bool, related *Organisation) {
-	if err := o.SetOrg(boil.GetDB(), insert, related); err != nil {
+func (o *UserToken) SetTokenGP(insert bool, related *Token) {
+	if err := o.SetToken(boil.GetDB(), insert, related); err != nil {
 		panic(boil.WrapErr(err))
 	}
 }
 
-// SetOrg of the user_token to the related item.
-// Sets o.R.Org to related.
-// Adds o to related.R.OrgUserTokens.
-func (o *UserToken) SetOrg(exec boil.Executor, insert bool, related *Organisation) error {
+// SetToken of the user_token to the related item.
+// Sets o.R.Token to related.
+// Adds o to related.R.UserTokens.
+func (o *UserToken) SetToken(exec boil.Executor, insert bool, related *Token) error {
 	var err error
 	if insert {
 		if err = related.Insert(exec); err != nil {
@@ -622,10 +622,10 @@ func (o *UserToken) SetOrg(exec boil.Executor, insert bool, related *Organisatio
 
 	updateQuery := fmt.Sprintf(
 		"UPDATE \"user_tokens\" SET %s WHERE %s",
-		strmangle.SetParamNames("\"", "\"", 1, []string{"org_id"}),
+		strmangle.SetParamNames("\"", "\"", 1, []string{"token_id"}),
 		strmangle.WhereClause("\"", "\"", 2, userTokenPrimaryKeyColumns),
 	)
-	values := []interface{}{related.ID, o.UserID, o.OrgID}
+	values := []interface{}{related.ID, o.UserID, o.TokenID}
 
 	if boil.DebugMode {
 		fmt.Fprintln(boil.DebugWriter, updateQuery)
@@ -636,22 +636,22 @@ func (o *UserToken) SetOrg(exec boil.Executor, insert bool, related *Organisatio
 		return errors.Wrap(err, "failed to update local table")
 	}
 
-	o.OrgID = related.ID
+	o.TokenID = related.ID
 
 	if o.R == nil {
 		o.R = &userTokenR{
-			Org: related,
+			Token: related,
 		}
 	} else {
-		o.R.Org = related
+		o.R.Token = related
 	}
 
 	if related.R == nil {
-		related.R = &organisationR{
-			OrgUserTokens: UserTokenSlice{o},
+		related.R = &tokenR{
+			UserTokens: UserTokenSlice{o},
 		}
 	} else {
-		related.R.OrgUserTokens = append(related.R.OrgUserTokens, o)
+		related.R.UserTokens = append(related.R.UserTokens, o)
 	}
 
 	return nil
@@ -669,13 +669,13 @@ func UserTokens(exec boil.Executor, mods ...qm.QueryMod) userTokenQuery {
 }
 
 // FindUserTokenG retrieves a single record by ID.
-func FindUserTokenG(userID string, orgID string, selectCols ...string) (*UserToken, error) {
-	return FindUserToken(boil.GetDB(), userID, orgID, selectCols...)
+func FindUserTokenG(userID string, tokenID string, selectCols ...string) (*UserToken, error) {
+	return FindUserToken(boil.GetDB(), userID, tokenID, selectCols...)
 }
 
 // FindUserTokenGP retrieves a single record by ID, and panics on error.
-func FindUserTokenGP(userID string, orgID string, selectCols ...string) *UserToken {
-	retobj, err := FindUserToken(boil.GetDB(), userID, orgID, selectCols...)
+func FindUserTokenGP(userID string, tokenID string, selectCols ...string) *UserToken {
+	retobj, err := FindUserToken(boil.GetDB(), userID, tokenID, selectCols...)
 	if err != nil {
 		panic(boil.WrapErr(err))
 	}
@@ -685,7 +685,7 @@ func FindUserTokenGP(userID string, orgID string, selectCols ...string) *UserTok
 
 // FindUserToken retrieves a single record by ID with an executor.
 // If selectCols is empty Find will return all columns.
-func FindUserToken(exec boil.Executor, userID string, orgID string, selectCols ...string) (*UserToken, error) {
+func FindUserToken(exec boil.Executor, userID string, tokenID string, selectCols ...string) (*UserToken, error) {
 	userTokenObj := &UserToken{}
 
 	sel := "*"
@@ -693,10 +693,10 @@ func FindUserToken(exec boil.Executor, userID string, orgID string, selectCols .
 		sel = strings.Join(strmangle.IdentQuoteSlice(dialect.LQ, dialect.RQ, selectCols), ",")
 	}
 	query := fmt.Sprintf(
-		"select %s from \"user_tokens\" where \"user_id\"=$1 AND \"org_id\"=$2", sel,
+		"select %s from \"user_tokens\" where \"user_id\"=$1 AND \"token_id\"=$2", sel,
 	)
 
-	q := queries.Raw(exec, query, userID, orgID)
+	q := queries.Raw(exec, query, userID, tokenID)
 
 	err := q.Bind(userTokenObj)
 	if err != nil {
@@ -710,8 +710,8 @@ func FindUserToken(exec boil.Executor, userID string, orgID string, selectCols .
 }
 
 // FindUserTokenP retrieves a single record by ID with an executor, and panics on error.
-func FindUserTokenP(exec boil.Executor, userID string, orgID string, selectCols ...string) *UserToken {
-	retobj, err := FindUserToken(exec, userID, orgID, selectCols...)
+func FindUserTokenP(exec boil.Executor, userID string, tokenID string, selectCols ...string) *UserToken {
+	retobj, err := FindUserToken(exec, userID, tokenID, selectCols...)
 	if err != nil {
 		panic(boil.WrapErr(err))
 	}
@@ -958,7 +958,7 @@ func (o UserTokenSlice) UpdateAll(exec boil.Executor, cols M) error {
 	}
 
 	sql := fmt.Sprintf(
-		"UPDATE \"user_tokens\" SET %s WHERE (\"user_id\",\"org_id\") IN (%s)",
+		"UPDATE \"user_tokens\" SET %s WHERE (\"user_id\",\"token_id\") IN (%s)",
 		strmangle.SetParamNames("\"", "\"", 1, colNames),
 		strmangle.Placeholders(dialect.IndexPlaceholders, len(o)*len(userTokenPrimaryKeyColumns), len(colNames)+1, len(userTokenPrimaryKeyColumns)),
 	)
@@ -1150,7 +1150,7 @@ func (o *UserToken) Delete(exec boil.Executor) error {
 	}
 
 	args := queries.ValuesFromMapping(reflect.Indirect(reflect.ValueOf(o)), userTokenPrimaryKeyMapping)
-	sql := "DELETE FROM \"user_tokens\" WHERE \"user_id\"=$1 AND \"org_id\"=$2"
+	sql := "DELETE FROM \"user_tokens\" WHERE \"user_id\"=$1 AND \"token_id\"=$2"
 
 	if boil.DebugMode {
 		fmt.Fprintln(boil.DebugWriter, sql)
@@ -1291,7 +1291,7 @@ func (o *UserToken) ReloadG() error {
 // Reload refetches the object from the database
 // using the primary keys with an executor.
 func (o *UserToken) Reload(exec boil.Executor) error {
-	ret, err := FindUserToken(exec, o.UserID, o.OrgID)
+	ret, err := FindUserToken(exec, o.UserID, o.TokenID)
 	if err != nil {
 		return err
 	}
@@ -1361,17 +1361,17 @@ func (o *UserTokenSlice) ReloadAll(exec boil.Executor) error {
 }
 
 // UserTokenExists checks if the UserToken row exists.
-func UserTokenExists(exec boil.Executor, userID string, orgID string) (bool, error) {
+func UserTokenExists(exec boil.Executor, userID string, tokenID string) (bool, error) {
 	var exists bool
 
-	sql := "select exists(select 1 from \"user_tokens\" where \"user_id\"=$1 AND \"org_id\"=$2 limit 1)"
+	sql := "select exists(select 1 from \"user_tokens\" where \"user_id\"=$1 AND \"token_id\"=$2 limit 1)"
 
 	if boil.DebugMode {
 		fmt.Fprintln(boil.DebugWriter, sql)
-		fmt.Fprintln(boil.DebugWriter, userID, orgID)
+		fmt.Fprintln(boil.DebugWriter, userID, tokenID)
 	}
 
-	row := exec.QueryRow(sql, userID, orgID)
+	row := exec.QueryRow(sql, userID, tokenID)
 
 	err := row.Scan(&exists)
 	if err != nil {
@@ -1382,13 +1382,13 @@ func UserTokenExists(exec boil.Executor, userID string, orgID string) (bool, err
 }
 
 // UserTokenExistsG checks if the UserToken row exists.
-func UserTokenExistsG(userID string, orgID string) (bool, error) {
-	return UserTokenExists(boil.GetDB(), userID, orgID)
+func UserTokenExistsG(userID string, tokenID string) (bool, error) {
+	return UserTokenExists(boil.GetDB(), userID, tokenID)
 }
 
 // UserTokenExistsGP checks if the UserToken row exists. Panics on error.
-func UserTokenExistsGP(userID string, orgID string) bool {
-	e, err := UserTokenExists(boil.GetDB(), userID, orgID)
+func UserTokenExistsGP(userID string, tokenID string) bool {
+	e, err := UserTokenExists(boil.GetDB(), userID, tokenID)
 	if err != nil {
 		panic(boil.WrapErr(err))
 	}
@@ -1397,8 +1397,8 @@ func UserTokenExistsGP(userID string, orgID string) bool {
 }
 
 // UserTokenExistsP checks if the UserToken row exists. Panics on error.
-func UserTokenExistsP(exec boil.Executor, userID string, orgID string) bool {
-	e, err := UserTokenExists(exec, userID, orgID)
+func UserTokenExistsP(exec boil.Executor, userID string, tokenID string) bool {
+	e, err := UserTokenExists(exec, userID, tokenID)
 	if err != nil {
 		panic(boil.WrapErr(err))
 	}

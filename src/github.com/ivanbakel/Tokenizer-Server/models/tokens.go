@@ -29,7 +29,8 @@ type Token struct {
 
 // tokenR is where relationships are stored.
 type tokenR struct {
-	Org *Organisation
+	Org        *Organisation
+	UserTokens UserTokenSlice
 }
 
 // tokenL is where Load methods for each relationship are stored.
@@ -337,6 +338,30 @@ func (o *Token) Org(exec boil.Executor, mods ...qm.QueryMod) organisationQuery {
 	return query
 }
 
+// UserTokensG retrieves all the user_token's user tokens.
+func (o *Token) UserTokensG(mods ...qm.QueryMod) userTokenQuery {
+	return o.UserTokens(boil.GetDB(), mods...)
+}
+
+// UserTokens retrieves all the user_token's user tokens with an executor.
+func (o *Token) UserTokens(exec boil.Executor, mods ...qm.QueryMod) userTokenQuery {
+	queryMods := []qm.QueryMod{
+		qm.Select("\"a\".*"),
+	}
+
+	if len(mods) != 0 {
+		queryMods = append(queryMods, mods...)
+	}
+
+	queryMods = append(queryMods,
+		qm.Where("\"a\".\"token_id\"=?", o.ID),
+	)
+
+	query := UserTokens(exec, queryMods...)
+	queries.SetFrom(query.Query, "\"user_tokens\" as \"a\"")
+	return query
+}
+
 // LoadOrg allows an eager lookup of values, cached into the
 // loaded structs of the objects.
 func (tokenL) LoadOrg(e boil.Executor, singular bool, maybeToken interface{}) error {
@@ -403,6 +428,78 @@ func (tokenL) LoadOrg(e boil.Executor, singular bool, maybeToken interface{}) er
 		for _, local := range slice {
 			if local.OrgID == foreign.ID {
 				local.R.Org = foreign
+				break
+			}
+		}
+	}
+
+	return nil
+}
+
+// LoadUserTokens allows an eager lookup of values, cached into the
+// loaded structs of the objects.
+func (tokenL) LoadUserTokens(e boil.Executor, singular bool, maybeToken interface{}) error {
+	var slice []*Token
+	var object *Token
+
+	count := 1
+	if singular {
+		object = maybeToken.(*Token)
+	} else {
+		slice = *maybeToken.(*TokenSlice)
+		count = len(slice)
+	}
+
+	args := make([]interface{}, count)
+	if singular {
+		if object.R == nil {
+			object.R = &tokenR{}
+		}
+		args[0] = object.ID
+	} else {
+		for i, obj := range slice {
+			if obj.R == nil {
+				obj.R = &tokenR{}
+			}
+			args[i] = obj.ID
+		}
+	}
+
+	query := fmt.Sprintf(
+		"select * from \"user_tokens\" where \"token_id\" in (%s)",
+		strmangle.Placeholders(dialect.IndexPlaceholders, count, 1, 1),
+	)
+	if boil.DebugMode {
+		fmt.Fprintf(boil.DebugWriter, "%s\n%v\n", query, args)
+	}
+
+	results, err := e.Query(query, args...)
+	if err != nil {
+		return errors.Wrap(err, "failed to eager load user_tokens")
+	}
+	defer results.Close()
+
+	var resultSlice []*UserToken
+	if err = queries.Bind(results, &resultSlice); err != nil {
+		return errors.Wrap(err, "failed to bind eager loaded slice user_tokens")
+	}
+
+	if len(userTokenAfterSelectHooks) != 0 {
+		for _, obj := range resultSlice {
+			if err := obj.doAfterSelectHooks(e); err != nil {
+				return err
+			}
+		}
+	}
+	if singular {
+		object.R.UserTokens = resultSlice
+		return nil
+	}
+
+	for _, foreign := range resultSlice {
+		for _, local := range slice {
+			if local.ID == foreign.TokenID {
+				local.R.UserTokens = append(local.R.UserTokens, foreign)
 				break
 			}
 		}
@@ -484,6 +581,90 @@ func (o *Token) SetOrg(exec boil.Executor, insert bool, related *Organisation) e
 		related.R.OrgTokens = append(related.R.OrgTokens, o)
 	}
 
+	return nil
+}
+
+// AddUserTokensG adds the given related objects to the existing relationships
+// of the token, optionally inserting them as new records.
+// Appends related to o.R.UserTokens.
+// Sets related.R.Token appropriately.
+// Uses the global database handle.
+func (o *Token) AddUserTokensG(insert bool, related ...*UserToken) error {
+	return o.AddUserTokens(boil.GetDB(), insert, related...)
+}
+
+// AddUserTokensP adds the given related objects to the existing relationships
+// of the token, optionally inserting them as new records.
+// Appends related to o.R.UserTokens.
+// Sets related.R.Token appropriately.
+// Panics on error.
+func (o *Token) AddUserTokensP(exec boil.Executor, insert bool, related ...*UserToken) {
+	if err := o.AddUserTokens(exec, insert, related...); err != nil {
+		panic(boil.WrapErr(err))
+	}
+}
+
+// AddUserTokensGP adds the given related objects to the existing relationships
+// of the token, optionally inserting them as new records.
+// Appends related to o.R.UserTokens.
+// Sets related.R.Token appropriately.
+// Uses the global database handle and panics on error.
+func (o *Token) AddUserTokensGP(insert bool, related ...*UserToken) {
+	if err := o.AddUserTokens(boil.GetDB(), insert, related...); err != nil {
+		panic(boil.WrapErr(err))
+	}
+}
+
+// AddUserTokens adds the given related objects to the existing relationships
+// of the token, optionally inserting them as new records.
+// Appends related to o.R.UserTokens.
+// Sets related.R.Token appropriately.
+func (o *Token) AddUserTokens(exec boil.Executor, insert bool, related ...*UserToken) error {
+	var err error
+	for _, rel := range related {
+		if insert {
+			rel.TokenID = o.ID
+			if err = rel.Insert(exec); err != nil {
+				return errors.Wrap(err, "failed to insert into foreign table")
+			}
+		} else {
+			updateQuery := fmt.Sprintf(
+				"UPDATE \"user_tokens\" SET %s WHERE %s",
+				strmangle.SetParamNames("\"", "\"", 1, []string{"token_id"}),
+				strmangle.WhereClause("\"", "\"", 2, userTokenPrimaryKeyColumns),
+			)
+			values := []interface{}{o.ID, rel.UserID, rel.TokenID}
+
+			if boil.DebugMode {
+				fmt.Fprintln(boil.DebugWriter, updateQuery)
+				fmt.Fprintln(boil.DebugWriter, values)
+			}
+
+			if _, err = exec.Exec(updateQuery, values...); err != nil {
+				return errors.Wrap(err, "failed to update foreign table")
+			}
+
+			rel.TokenID = o.ID
+		}
+	}
+
+	if o.R == nil {
+		o.R = &tokenR{
+			UserTokens: related,
+		}
+	} else {
+		o.R.UserTokens = append(o.R.UserTokens, related...)
+	}
+
+	for _, rel := range related {
+		if rel.R == nil {
+			rel.R = &userTokenR{
+				Token: o,
+			}
+		} else {
+			rel.R.Token = o
+		}
+	}
 	return nil
 }
 

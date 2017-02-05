@@ -126,7 +126,7 @@ func testUserTokensExists(t *testing.T) {
 		t.Error(err)
 	}
 
-	e, err := UserTokenExists(tx, userToken.UserID, userToken.OrgID)
+	e, err := UserTokenExists(tx, userToken.UserID, userToken.TokenID)
 	if err != nil {
 		t.Errorf("Unable to check if UserToken exists: %s", err)
 	}
@@ -150,7 +150,7 @@ func testUserTokensFind(t *testing.T) {
 		t.Error(err)
 	}
 
-	userTokenFound, err := FindUserToken(tx, userToken.UserID, userToken.OrgID)
+	userTokenFound, err := FindUserToken(tx, userToken.UserID, userToken.TokenID)
 	if err != nil {
 		t.Error(err)
 	}
@@ -509,31 +509,31 @@ func testUserTokenToOneUserUsingUser(t *testing.T) {
 	}
 }
 
-func testUserTokenToOneOrganisationUsingOrg(t *testing.T) {
+func testUserTokenToOneTokenUsingToken(t *testing.T) {
 	tx := MustTx(boil.Begin())
 	defer tx.Rollback()
 
 	var local UserToken
-	var foreign Organisation
+	var foreign Token
 
 	seed := randomize.NewSeed()
 	if err := randomize.Struct(seed, &local, userTokenDBTypes, true, userTokenColumnsWithDefault...); err != nil {
 		t.Errorf("Unable to randomize UserToken struct: %s", err)
 	}
-	if err := randomize.Struct(seed, &foreign, organisationDBTypes, true, organisationColumnsWithDefault...); err != nil {
-		t.Errorf("Unable to randomize Organisation struct: %s", err)
+	if err := randomize.Struct(seed, &foreign, tokenDBTypes, true, tokenColumnsWithDefault...); err != nil {
+		t.Errorf("Unable to randomize Token struct: %s", err)
 	}
 
 	if err := foreign.Insert(tx); err != nil {
 		t.Fatal(err)
 	}
 
-	local.OrgID = foreign.ID
+	local.TokenID = foreign.ID
 	if err := local.Insert(tx); err != nil {
 		t.Fatal(err)
 	}
 
-	check, err := local.Org(tx).One()
+	check, err := local.Token(tx).One()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,18 +543,18 @@ func testUserTokenToOneOrganisationUsingOrg(t *testing.T) {
 	}
 
 	slice := UserTokenSlice{&local}
-	if err = local.L.LoadOrg(tx, false, &slice); err != nil {
+	if err = local.L.LoadToken(tx, false, &slice); err != nil {
 		t.Fatal(err)
 	}
-	if local.R.Org == nil {
+	if local.R.Token == nil {
 		t.Error("struct should have been eager loaded")
 	}
 
-	local.R.Org = nil
-	if err = local.L.LoadOrg(tx, true, &local); err != nil {
+	local.R.Token = nil
+	if err = local.L.LoadToken(tx, true, &local); err != nil {
 		t.Fatal(err)
 	}
-	if local.R.Org == nil {
+	if local.R.Token == nil {
 		t.Error("struct should have been eager loaded")
 	}
 }
@@ -603,7 +603,7 @@ func testUserTokenToOneSetOpUserUsingUser(t *testing.T) {
 			t.Error("foreign key was wrong value", a.UserID)
 		}
 
-		if exists, err := UserTokenExists(tx, a.UserID, a.OrgID); err != nil {
+		if exists, err := UserTokenExists(tx, a.UserID, a.TokenID); err != nil {
 			t.Fatal(err)
 		} else if !exists {
 			t.Error("want 'a' to exist")
@@ -611,23 +611,23 @@ func testUserTokenToOneSetOpUserUsingUser(t *testing.T) {
 
 	}
 }
-func testUserTokenToOneSetOpOrganisationUsingOrg(t *testing.T) {
+func testUserTokenToOneSetOpTokenUsingToken(t *testing.T) {
 	var err error
 
 	tx := MustTx(boil.Begin())
 	defer tx.Rollback()
 
 	var a UserToken
-	var b, c Organisation
+	var b, c Token
 
 	seed := randomize.NewSeed()
 	if err = randomize.Struct(seed, &a, userTokenDBTypes, false, strmangle.SetComplement(userTokenPrimaryKeyColumns, userTokenColumnsWithoutDefault)...); err != nil {
 		t.Fatal(err)
 	}
-	if err = randomize.Struct(seed, &b, organisationDBTypes, false, strmangle.SetComplement(organisationPrimaryKeyColumns, organisationColumnsWithoutDefault)...); err != nil {
+	if err = randomize.Struct(seed, &b, tokenDBTypes, false, strmangle.SetComplement(tokenPrimaryKeyColumns, tokenColumnsWithoutDefault)...); err != nil {
 		t.Fatal(err)
 	}
-	if err = randomize.Struct(seed, &c, organisationDBTypes, false, strmangle.SetComplement(organisationPrimaryKeyColumns, organisationColumnsWithoutDefault)...); err != nil {
+	if err = randomize.Struct(seed, &c, tokenDBTypes, false, strmangle.SetComplement(tokenPrimaryKeyColumns, tokenColumnsWithoutDefault)...); err != nil {
 		t.Fatal(err)
 	}
 
@@ -638,24 +638,24 @@ func testUserTokenToOneSetOpOrganisationUsingOrg(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i, x := range []*Organisation{&b, &c} {
-		err = a.SetOrg(tx, i != 0, x)
+	for i, x := range []*Token{&b, &c} {
+		err = a.SetToken(tx, i != 0, x)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if a.R.Org != x {
+		if a.R.Token != x {
 			t.Error("relationship struct not set to correct value")
 		}
 
-		if x.R.OrgUserTokens[0] != &a {
+		if x.R.UserTokens[0] != &a {
 			t.Error("failed to append to foreign relationship struct")
 		}
-		if a.OrgID != x.ID {
-			t.Error("foreign key was wrong value", a.OrgID)
+		if a.TokenID != x.ID {
+			t.Error("foreign key was wrong value", a.TokenID)
 		}
 
-		if exists, err := UserTokenExists(tx, a.UserID, a.OrgID); err != nil {
+		if exists, err := UserTokenExists(tx, a.UserID, a.TokenID); err != nil {
 			t.Fatal(err)
 		} else if !exists {
 			t.Error("want 'a' to exist")
@@ -733,7 +733,7 @@ func testUserTokensSelect(t *testing.T) {
 }
 
 var (
-	userTokenDBTypes = map[string]string{`Number`: `smallint`, `OrgID`: `uuid`, `UserID`: `uuid`}
+	userTokenDBTypes = map[string]string{`Number`: `smallint`, `TokenID`: `uuid`, `UserID`: `uuid`}
 	_                = bytes.MinRead
 )
 

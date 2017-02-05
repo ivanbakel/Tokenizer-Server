@@ -459,6 +459,152 @@ func testTokensInsertWhitelist(t *testing.T) {
 	}
 }
 
+func testTokenToManyUserTokens(t *testing.T) {
+	var err error
+	tx := MustTx(boil.Begin())
+	defer tx.Rollback()
+
+	var a Token
+	var b, c UserToken
+
+	seed := randomize.NewSeed()
+	if err = randomize.Struct(seed, &a, tokenDBTypes, true, tokenColumnsWithDefault...); err != nil {
+		t.Errorf("Unable to randomize Token struct: %s", err)
+	}
+
+	if err := a.Insert(tx); err != nil {
+		t.Fatal(err)
+	}
+
+	randomize.Struct(seed, &b, userTokenDBTypes, false, userTokenColumnsWithDefault...)
+	randomize.Struct(seed, &c, userTokenDBTypes, false, userTokenColumnsWithDefault...)
+
+	b.TokenID = a.ID
+	c.TokenID = a.ID
+	if err = b.Insert(tx); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Insert(tx); err != nil {
+		t.Fatal(err)
+	}
+
+	userToken, err := a.UserTokens(tx).All()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bFound, cFound := false, false
+	for _, v := range userToken {
+		if v.TokenID == b.TokenID {
+			bFound = true
+		}
+		if v.TokenID == c.TokenID {
+			cFound = true
+		}
+	}
+
+	if !bFound {
+		t.Error("expected to find b")
+	}
+	if !cFound {
+		t.Error("expected to find c")
+	}
+
+	slice := TokenSlice{&a}
+	if err = a.L.LoadUserTokens(tx, false, &slice); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(a.R.UserTokens); got != 2 {
+		t.Error("number of eager loaded records wrong, got:", got)
+	}
+
+	a.R.UserTokens = nil
+	if err = a.L.LoadUserTokens(tx, true, &a); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(a.R.UserTokens); got != 2 {
+		t.Error("number of eager loaded records wrong, got:", got)
+	}
+
+	if t.Failed() {
+		t.Logf("%#v", userToken)
+	}
+}
+
+func testTokenToManyAddOpUserTokens(t *testing.T) {
+	var err error
+
+	tx := MustTx(boil.Begin())
+	defer tx.Rollback()
+
+	var a Token
+	var b, c, d, e UserToken
+
+	seed := randomize.NewSeed()
+	if err = randomize.Struct(seed, &a, tokenDBTypes, false, strmangle.SetComplement(tokenPrimaryKeyColumns, tokenColumnsWithoutDefault)...); err != nil {
+		t.Fatal(err)
+	}
+	foreigners := []*UserToken{&b, &c, &d, &e}
+	for _, x := range foreigners {
+		if err = randomize.Struct(seed, x, userTokenDBTypes, false, strmangle.SetComplement(userTokenPrimaryKeyColumns, userTokenColumnsWithoutDefault)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := a.Insert(tx); err != nil {
+		t.Fatal(err)
+	}
+	if err = b.Insert(tx); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Insert(tx); err != nil {
+		t.Fatal(err)
+	}
+
+	foreignersSplitByInsertion := [][]*UserToken{
+		{&b, &c},
+		{&d, &e},
+	}
+
+	for i, x := range foreignersSplitByInsertion {
+		err = a.AddUserTokens(tx, i != 0, x...)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		first := x[0]
+		second := x[1]
+
+		if a.ID != first.TokenID {
+			t.Error("foreign key was wrong value", a.ID, first.TokenID)
+		}
+		if a.ID != second.TokenID {
+			t.Error("foreign key was wrong value", a.ID, second.TokenID)
+		}
+
+		if first.R.Token != &a {
+			t.Error("relationship was not added properly to the foreign slice")
+		}
+		if second.R.Token != &a {
+			t.Error("relationship was not added properly to the foreign slice")
+		}
+
+		if a.R.UserTokens[i*2] != first {
+			t.Error("relationship struct slice not set to correct value")
+		}
+		if a.R.UserTokens[i*2+1] != second {
+			t.Error("relationship struct slice not set to correct value")
+		}
+
+		count, err := a.UserTokens(tx).Count()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := int64((i + 1) * 2); count != want {
+			t.Error("want", want, "got", count)
+		}
+	}
+}
 func testTokenToOneOrganisationUsingOrg(t *testing.T) {
 	tx := MustTx(boil.Begin())
 	defer tx.Rollback()

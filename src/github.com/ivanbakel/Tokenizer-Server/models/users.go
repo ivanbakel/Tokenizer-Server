@@ -694,7 +694,7 @@ func (o *User) AddUserTokens(exec boil.Executor, insert bool, related ...*UserTo
 				strmangle.SetParamNames("\"", "\"", 1, []string{"user_id"}),
 				strmangle.WhereClause("\"", "\"", 2, userTokenPrimaryKeyColumns),
 			)
-			values := []interface{}{o.ID, rel.UserID, rel.OrgID}
+			values := []interface{}{o.ID, rel.UserID, rel.TokenID}
 
 			if boil.DebugMode {
 				fmt.Fprintln(boil.DebugWriter, updateQuery)

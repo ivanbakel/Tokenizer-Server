@@ -459,6 +459,78 @@ func testOrganisationsInsertWhitelist(t *testing.T) {
 	}
 }
 
+func testOrganisationToManyOrgTokens(t *testing.T) {
+	var err error
+	tx := MustTx(boil.Begin())
+	defer tx.Rollback()
+
+	var a Organisation
+	var b, c Token
+
+	seed := randomize.NewSeed()
+	if err = randomize.Struct(seed, &a, organisationDBTypes, true, organisationColumnsWithDefault...); err != nil {
+		t.Errorf("Unable to randomize Organisation struct: %s", err)
+	}
+
+	if err := a.Insert(tx); err != nil {
+		t.Fatal(err)
+	}
+
+	randomize.Struct(seed, &b, tokenDBTypes, false, tokenColumnsWithDefault...)
+	randomize.Struct(seed, &c, tokenDBTypes, false, tokenColumnsWithDefault...)
+
+	b.OrgID = a.ID
+	c.OrgID = a.ID
+	if err = b.Insert(tx); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Insert(tx); err != nil {
+		t.Fatal(err)
+	}
+
+	token, err := a.OrgTokens(tx).All()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bFound, cFound := false, false
+	for _, v := range token {
+		if v.OrgID == b.OrgID {
+			bFound = true
+		}
+		if v.OrgID == c.OrgID {
+			cFound = true
+		}
+	}
+
+	if !bFound {
+		t.Error("expected to find b")
+	}
+	if !cFound {
+		t.Error("expected to find c")
+	}
+
+	slice := OrganisationSlice{&a}
+	if err = a.L.LoadOrgTokens(tx, false, &slice); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(a.R.OrgTokens); got != 2 {
+		t.Error("number of eager loaded records wrong, got:", got)
+	}
+
+	a.R.OrgTokens = nil
+	if err = a.L.LoadOrgTokens(tx, true, &a); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(a.R.OrgTokens); got != 2 {
+		t.Error("number of eager loaded records wrong, got:", got)
+	}
+
+	if t.Failed() {
+		t.Logf("%#v", token)
+	}
+}
+
 func testOrganisationToManyOrgUsers(t *testing.T) {
 	var err error
 	tx := MustTx(boil.Begin())
@@ -533,28 +605,29 @@ func testOrganisationToManyOrgUsers(t *testing.T) {
 	}
 }
 
-func testOrganisationToManyOrgUserTokens(t *testing.T) {
+func testOrganisationToManyAddOpOrgTokens(t *testing.T) {
 	var err error
+
 	tx := MustTx(boil.Begin())
 	defer tx.Rollback()
 
 	var a Organisation
-	var b, c UserToken
+	var b, c, d, e Token
 
 	seed := randomize.NewSeed()
-	if err = randomize.Struct(seed, &a, organisationDBTypes, true, organisationColumnsWithDefault...); err != nil {
-		t.Errorf("Unable to randomize Organisation struct: %s", err)
+	if err = randomize.Struct(seed, &a, organisationDBTypes, false, strmangle.SetComplement(organisationPrimaryKeyColumns, organisationColumnsWithoutDefault)...); err != nil {
+		t.Fatal(err)
+	}
+	foreigners := []*Token{&b, &c, &d, &e}
+	for _, x := range foreigners {
+		if err = randomize.Struct(seed, x, tokenDBTypes, false, strmangle.SetComplement(tokenPrimaryKeyColumns, tokenColumnsWithoutDefault)...); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err := a.Insert(tx); err != nil {
 		t.Fatal(err)
 	}
-
-	randomize.Struct(seed, &b, userTokenDBTypes, false, userTokenColumnsWithDefault...)
-	randomize.Struct(seed, &c, userTokenDBTypes, false, userTokenColumnsWithDefault...)
-
-	b.OrgID = a.ID
-	c.OrgID = a.ID
 	if err = b.Insert(tx); err != nil {
 		t.Fatal(err)
 	}
@@ -562,121 +635,50 @@ func testOrganisationToManyOrgUserTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	userToken, err := a.OrgUserTokens(tx).All()
-	if err != nil {
-		t.Fatal(err)
+	foreignersSplitByInsertion := [][]*Token{
+		{&b, &c},
+		{&d, &e},
 	}
 
-	bFound, cFound := false, false
-	for _, v := range userToken {
-		if v.OrgID == b.OrgID {
-			bFound = true
+	for i, x := range foreignersSplitByInsertion {
+		err = a.AddOrgTokens(tx, i != 0, x...)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if v.OrgID == c.OrgID {
-			cFound = true
+
+		first := x[0]
+		second := x[1]
+
+		if a.ID != first.OrgID {
+			t.Error("foreign key was wrong value", a.ID, first.OrgID)
 		}
-	}
+		if a.ID != second.OrgID {
+			t.Error("foreign key was wrong value", a.ID, second.OrgID)
+		}
 
-	if !bFound {
-		t.Error("expected to find b")
-	}
-	if !cFound {
-		t.Error("expected to find c")
-	}
+		if first.R.Org != &a {
+			t.Error("relationship was not added properly to the foreign slice")
+		}
+		if second.R.Org != &a {
+			t.Error("relationship was not added properly to the foreign slice")
+		}
 
-	slice := OrganisationSlice{&a}
-	if err = a.L.LoadOrgUserTokens(tx, false, &slice); err != nil {
-		t.Fatal(err)
-	}
-	if got := len(a.R.OrgUserTokens); got != 2 {
-		t.Error("number of eager loaded records wrong, got:", got)
-	}
+		if a.R.OrgTokens[i*2] != first {
+			t.Error("relationship struct slice not set to correct value")
+		}
+		if a.R.OrgTokens[i*2+1] != second {
+			t.Error("relationship struct slice not set to correct value")
+		}
 
-	a.R.OrgUserTokens = nil
-	if err = a.L.LoadOrgUserTokens(tx, true, &a); err != nil {
-		t.Fatal(err)
-	}
-	if got := len(a.R.OrgUserTokens); got != 2 {
-		t.Error("number of eager loaded records wrong, got:", got)
-	}
-
-	if t.Failed() {
-		t.Logf("%#v", userToken)
+		count, err := a.OrgTokens(tx).Count()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := int64((i + 1) * 2); count != want {
+			t.Error("want", want, "got", count)
+		}
 	}
 }
-
-func testOrganisationToManyOrgTokens(t *testing.T) {
-	var err error
-	tx := MustTx(boil.Begin())
-	defer tx.Rollback()
-
-	var a Organisation
-	var b, c Token
-
-	seed := randomize.NewSeed()
-	if err = randomize.Struct(seed, &a, organisationDBTypes, true, organisationColumnsWithDefault...); err != nil {
-		t.Errorf("Unable to randomize Organisation struct: %s", err)
-	}
-
-	if err := a.Insert(tx); err != nil {
-		t.Fatal(err)
-	}
-
-	randomize.Struct(seed, &b, tokenDBTypes, false, tokenColumnsWithDefault...)
-	randomize.Struct(seed, &c, tokenDBTypes, false, tokenColumnsWithDefault...)
-
-	b.OrgID = a.ID
-	c.OrgID = a.ID
-	if err = b.Insert(tx); err != nil {
-		t.Fatal(err)
-	}
-	if err = c.Insert(tx); err != nil {
-		t.Fatal(err)
-	}
-
-	token, err := a.OrgTokens(tx).All()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	bFound, cFound := false, false
-	for _, v := range token {
-		if v.OrgID == b.OrgID {
-			bFound = true
-		}
-		if v.OrgID == c.OrgID {
-			cFound = true
-		}
-	}
-
-	if !bFound {
-		t.Error("expected to find b")
-	}
-	if !cFound {
-		t.Error("expected to find c")
-	}
-
-	slice := OrganisationSlice{&a}
-	if err = a.L.LoadOrgTokens(tx, false, &slice); err != nil {
-		t.Fatal(err)
-	}
-	if got := len(a.R.OrgTokens); got != 2 {
-		t.Error("number of eager loaded records wrong, got:", got)
-	}
-
-	a.R.OrgTokens = nil
-	if err = a.L.LoadOrgTokens(tx, true, &a); err != nil {
-		t.Fatal(err)
-	}
-	if got := len(a.R.OrgTokens); got != 2 {
-		t.Error("number of eager loaded records wrong, got:", got)
-	}
-
-	if t.Failed() {
-		t.Logf("%#v", token)
-	}
-}
-
 func testOrganisationToManyAddOpOrgUsers(t *testing.T) {
 	var err error
 
@@ -922,155 +924,6 @@ func testOrganisationToManyRemoveOpOrgUsers(t *testing.T) {
 	}
 	if a.R.OrgUsers[0] != &e {
 		t.Error("relationship to e should have been preserved")
-	}
-}
-
-func testOrganisationToManyAddOpOrgUserTokens(t *testing.T) {
-	var err error
-
-	tx := MustTx(boil.Begin())
-	defer tx.Rollback()
-
-	var a Organisation
-	var b, c, d, e UserToken
-
-	seed := randomize.NewSeed()
-	if err = randomize.Struct(seed, &a, organisationDBTypes, false, strmangle.SetComplement(organisationPrimaryKeyColumns, organisationColumnsWithoutDefault)...); err != nil {
-		t.Fatal(err)
-	}
-	foreigners := []*UserToken{&b, &c, &d, &e}
-	for _, x := range foreigners {
-		if err = randomize.Struct(seed, x, userTokenDBTypes, false, strmangle.SetComplement(userTokenPrimaryKeyColumns, userTokenColumnsWithoutDefault)...); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if err := a.Insert(tx); err != nil {
-		t.Fatal(err)
-	}
-	if err = b.Insert(tx); err != nil {
-		t.Fatal(err)
-	}
-	if err = c.Insert(tx); err != nil {
-		t.Fatal(err)
-	}
-
-	foreignersSplitByInsertion := [][]*UserToken{
-		{&b, &c},
-		{&d, &e},
-	}
-
-	for i, x := range foreignersSplitByInsertion {
-		err = a.AddOrgUserTokens(tx, i != 0, x...)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		first := x[0]
-		second := x[1]
-
-		if a.ID != first.OrgID {
-			t.Error("foreign key was wrong value", a.ID, first.OrgID)
-		}
-		if a.ID != second.OrgID {
-			t.Error("foreign key was wrong value", a.ID, second.OrgID)
-		}
-
-		if first.R.Org != &a {
-			t.Error("relationship was not added properly to the foreign slice")
-		}
-		if second.R.Org != &a {
-			t.Error("relationship was not added properly to the foreign slice")
-		}
-
-		if a.R.OrgUserTokens[i*2] != first {
-			t.Error("relationship struct slice not set to correct value")
-		}
-		if a.R.OrgUserTokens[i*2+1] != second {
-			t.Error("relationship struct slice not set to correct value")
-		}
-
-		count, err := a.OrgUserTokens(tx).Count()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if want := int64((i + 1) * 2); count != want {
-			t.Error("want", want, "got", count)
-		}
-	}
-}
-func testOrganisationToManyAddOpOrgTokens(t *testing.T) {
-	var err error
-
-	tx := MustTx(boil.Begin())
-	defer tx.Rollback()
-
-	var a Organisation
-	var b, c, d, e Token
-
-	seed := randomize.NewSeed()
-	if err = randomize.Struct(seed, &a, organisationDBTypes, false, strmangle.SetComplement(organisationPrimaryKeyColumns, organisationColumnsWithoutDefault)...); err != nil {
-		t.Fatal(err)
-	}
-	foreigners := []*Token{&b, &c, &d, &e}
-	for _, x := range foreigners {
-		if err = randomize.Struct(seed, x, tokenDBTypes, false, strmangle.SetComplement(tokenPrimaryKeyColumns, tokenColumnsWithoutDefault)...); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if err := a.Insert(tx); err != nil {
-		t.Fatal(err)
-	}
-	if err = b.Insert(tx); err != nil {
-		t.Fatal(err)
-	}
-	if err = c.Insert(tx); err != nil {
-		t.Fatal(err)
-	}
-
-	foreignersSplitByInsertion := [][]*Token{
-		{&b, &c},
-		{&d, &e},
-	}
-
-	for i, x := range foreignersSplitByInsertion {
-		err = a.AddOrgTokens(tx, i != 0, x...)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		first := x[0]
-		second := x[1]
-
-		if a.ID != first.OrgID {
-			t.Error("foreign key was wrong value", a.ID, first.OrgID)
-		}
-		if a.ID != second.OrgID {
-			t.Error("foreign key was wrong value", a.ID, second.OrgID)
-		}
-
-		if first.R.Org != &a {
-			t.Error("relationship was not added properly to the foreign slice")
-		}
-		if second.R.Org != &a {
-			t.Error("relationship was not added properly to the foreign slice")
-		}
-
-		if a.R.OrgTokens[i*2] != first {
-			t.Error("relationship struct slice not set to correct value")
-		}
-		if a.R.OrgTokens[i*2+1] != second {
-			t.Error("relationship struct slice not set to correct value")
-		}
-
-		count, err := a.OrgTokens(tx).Count()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if want := int64((i + 1) * 2); count != want {
-			t.Error("want", want, "got", count)
-		}
 	}
 }
 
