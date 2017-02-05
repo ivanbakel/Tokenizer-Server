@@ -7,6 +7,7 @@ import (
 	_ "github.com/lib/pq"
 	"database/sql"
 	"log"
+	"github.com/vattle/sqlboiler/boil"
 )
 
 var dataBase *sql.DB
@@ -19,11 +20,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	_, err := sql.Open("postgres", fmt.Sprintf("user=%s dbname=%s sslmode=verify-full", databaseUsername, databaseName))
+	db, err := sql.Open("postgres", fmt.Sprintf("user=%s dbname=%s sslmode=verify-full", databaseUsername, databaseName))
 
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	boil.SetDB(db)
 
 	r := mux.NewRouter()
 	r.HandleFunc("/users", getUsers)
