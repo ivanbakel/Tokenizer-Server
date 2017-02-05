@@ -38,5 +38,5 @@ func main() {
 	r.HandleFunc("/users/{uid}/tokens/{tid}/spend", spendTokens)
 	r.HandleFunc("/orgs", getOrgs)
 	r.HandleFunc("/orgs/{oid}", getOrg)
-	http.ListenAndServe(":8080", nil)
+	http.ListenAndServe(":8080", r)
 }
