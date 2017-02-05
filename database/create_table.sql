@@ -1,33 +1,33 @@
 DROP TABLE IF EXISTS organisations CASCADE;
 
 CREATE TABLE organisations (
-  id	char(36)		PRIMARY KEY,
+  id	UUID		PRIMARY KEY DEFAULT uuid_generate_v4(),
   name	VARCHAR(50)	NOT NULL
 );
 
 DROP TABLE IF EXISTS users CASCADE;
 
 CREATE TABLE users (
-  id		char(36)		PRIMARY KEY,
+  id		UUID		PRIMARY KEY DEFAULT uuid_generate_v4(),
   facebook_id	VARCHAR(128)	NOT NULL,
-  org_id	char(36)		NULL REFERENCES organisations(id)
+  org_id	UUID		NULL REFERENCES organisations(id)
 );
 
 DROP TABLE IF EXISTS tokens CASCADE;
 
 CREATE TABLE tokens (
-  id		char(36)		PRIMARY KEY,
+  id		UUID		PRIMARY KEY DEFAULT uuid_generate_v4(),
   name		VARCHAR(100)	NOT NULL,
   expires	TIMESTAMP	NOT NULL,
-  org_id	char(36)		NOT NULL REFERENCES organisations(id)
+  org_id	UUID		NOT NULL REFERENCES organisations(id)
 );
 
 DROP TABLE IF EXISTS user_tokens;
 
 CREATE TABLE user_tokens (
-  user_id	char(36)		NOT NULL REFERENCES users(id),
-  org_id	char(36)		NOT NULL REFERENCES tokens(id), 
+  user_id	UUID		NOT NULL REFERENCES users(id),
+  token_id	UUID		NOT NULL REFERENCES tokens(id), 
   number	SMALLINT	DEFAULT 1,
-  PRIMARY KEY(user_id, org_id)
+  PRIMARY KEY(user_id, token_id)
 );
 
